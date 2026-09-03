@@ -1,0 +1,515 @@
+const express = require("express");
+const path = require("node:path");
+const fs = require("node:fs");
+
+function sanitizeUser(sessionLike) {
+  if (!sessionLike) return sessionLike;
+  const cfg = { ...(sessionLike.config || {}) };
+  cfg.reschedule = Boolean(cfg.reschedule);
+  cfg.executionMode = cfg.executionMode === "api" ? "api" : "dom";
+  const passwordSet = Boolean(cfg.passwordEnc || cfg.password);
+  const proxySet = Boolean(cfg.proxyUrlEnc || cfg.proxyUrl);
+  delete cfg.password;
+  delete cfg.passwordEnc;
+  delete cfg.passwordIv;
+  delete cfg.passwordTag;
+  delete cfg.proxyUrl;
+  delete cfg.proxyUrlEnc;
+  delete cfg.proxyUrlIv;
+  delete cfg.proxyUrlTag;
+
+  const timeline = {
+    dateStart: cfg.dateStart ?? null,
+    dateEnd: cfg.dateEnd ?? null,
+    daysFromNowMin: cfg.daysFromNowMin ?? null,
+    daysFromNowMax: cfg.daysFromNowMax ?? null,
+    weeksFromNowMin: cfg.weeksFromNowMin ?? null,
+    weeksFromNowMax: cfg.weeksFromNowMax ?? null,
+  };
+  return {
+    ...sessionLike,
+    config: {
+      ...cfg,
+      passwordSet,
+      proxySet,
+    },
+    timeline,
+  };
+}
+
+function isIsoDateOnly(value) {
+  // Accept YYYY-MM-DD (no time)
+  if (typeof value !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime());
+}
+
+function isNonNegativeInt(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function coerceNullableIsoDate(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+
+  if (typeof value === "string") {
+    // Accept YYYY-MM-DD or ISO timestamps; normalize to YYYY-MM-DD
+    const candidate = value.length >= 10 ? value.slice(0, 10) : value;
+    return isIsoDateOnly(candidate) ? candidate : "__invalid__";
+  }
+
+  return "__invalid__";
+}
+
+function coerceNullableNonNegativeInt(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+
+  if (typeof value === "number") {
+    return isNonNegativeInt(value) ? value : "__invalid__";
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const parsed = Number.parseInt(value, 10);
+    return isNonNegativeInt(parsed) ? parsed : "__invalid__";
+  }
+
+  return "__invalid__";
+}
+
+function normalizeDatePrefs(body) {
+  const src = body || {};
+
+  // Allow nested shapes from common UIs: { dateRange: { from, to } } or { dateRange: { start, end } }
+  const range =
+    src.dateRange && typeof src.dateRange === "object" ? src.dateRange : null;
+  const nestedStart = range ? (range.from ?? range.start) : undefined;
+  const nestedEnd = range ? (range.to ?? range.end) : undefined;
+
+  const dateStart = coerceNullableIsoDate(src.dateStart ?? nestedStart);
+  const dateEnd = coerceNullableIsoDate(src.dateEnd ?? nestedEnd);
+
+  // Allow nested shapes: { daysFromNow: { min, max } } / { weeksFromNow: { min, max } }
+  const daysObj =
+    src.daysFromNow && typeof src.daysFromNow === "object"
+      ? src.daysFromNow
+      : null;
+  const weeksObj =
+    src.weeksFromNow && typeof src.weeksFromNow === "object"
+      ? src.weeksFromNow
+      : null;
+
+  const daysFromNowMin = coerceNullableNonNegativeInt(
+    src.daysFromNowMin ?? (daysObj ? daysObj.min : undefined),
+  );
+  const daysFromNowMax = coerceNullableNonNegativeInt(
+    src.daysFromNowMax ?? (daysObj ? daysObj.max : undefined),
+  );
+  const weeksFromNowMin = coerceNullableNonNegativeInt(
+    src.weeksFromNowMin ?? (weeksObj ? weeksObj.min : undefined),
+  );
+  const weeksFromNowMax = coerceNullableNonNegativeInt(
+    src.weeksFromNowMax ?? (weeksObj ? weeksObj.max : undefined),
+  );
+
+  return {
+    dateStart,
+    dateEnd,
+    daysFromNowMin,
+    daysFromNowMax,
+    weeksFromNowMin,
+    weeksFromNowMax,
+  };
+}
+
+function normalizeNullableString(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") return "__invalid__";
+
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeExecutionMode(value, fallback = "dom") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") return "__invalid__";
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "api" || normalized === "dom"
+    ? normalized
+    : "__invalid__";
+}
+
+function createUsersRouter({ store, pool, baseDir, profilesDir }) {
+  const router = express.Router();
+
+  function readBoolEnv(name) {
+    const v = process.env[name];
+    if (v === undefined) return undefined;
+    return v === "1" || String(v).toLowerCase() === "true";
+  }
+
+  // List users
+  router.get("/", (req, res) => {
+    res.json(store.listSessions().map(sanitizeUser));
+  });
+
+  // Get user details
+  router.get("/:id", (req, res) => {
+    const user = store.getSession(req.params.id);
+    if (!user) return res.status(404).json({ error: "not_found" });
+    return res.json(sanitizeUser(user));
+  });
+
+  // Get user logs
+  router.get("/:id/logs", (req, res) => {
+    const user = store.getSession(req.params.id);
+    if (!user) return res.status(404).json({ error: "not_found" });
+
+    const tail = Math.max(1, Math.min(1000, Number(req.query.tail || 200)));
+    const logs = Array.isArray(user.logs) ? user.logs.slice(-tail) : [];
+    return res.json({ id: user.id, logs });
+  });
+
+  // Create user
+  router.post("/", (req, res) => {
+    const {
+      loginUrl,
+      email,
+      password,
+      displayName,
+      pickupPoint = "Accra",
+      headless = false,
+      reschedule,
+      executionMode,
+      autoStart,
+      proxyUrl,
+    } = req.body || {};
+
+    const defaultHeadless =
+      readBoolEnv("DEFAULT_HEADLESS") ??
+      readBoolEnv("HEADLESS_BROWSER") ??
+      process.env.NODE_ENV === "production";
+    const headlessEffective =
+      typeof headless === "boolean" ? headless : defaultHeadless;
+
+    const envAutoStart = readBoolEnv("AUTO_START_ON_CREATE") ?? false;
+    const queryAutoStart =
+      req.query?.autoStart === "1" ||
+      String(req.query?.autoStart || "").toLowerCase() === "true";
+    const autoStartEffective =
+      typeof autoStart === "boolean"
+        ? autoStart
+        : queryAutoStart || envAutoStart;
+
+    const rescheduleBool = reschedule === undefined ? false : reschedule;
+    const executionModeEffective = normalizeExecutionMode(executionMode, "dom");
+    const proxyUrlEffective = normalizeNullableString(proxyUrl);
+
+    const {
+      dateStart,
+      dateEnd,
+      daysFromNowMin,
+      daysFromNowMax,
+      weeksFromNowMin,
+      weeksFromNowMax,
+    } = normalizeDatePrefs(req.body);
+
+    if (!loginUrl || typeof loginUrl !== "string") {
+      return res.status(400).json({ error: "loginUrl_required" });
+    }
+    if (!email || typeof email !== "string") {
+      return res.status(400).json({ error: "email_required" });
+    }
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ error: "password_required" });
+    }
+    if (!displayName || typeof displayName !== "string") {
+      return res.status(400).json({ error: "displayName_required" });
+    }
+    if (rescheduleBool !== undefined && typeof rescheduleBool !== "boolean") {
+      return res.status(400).json({ error: "reschedule_invalid" });
+    }
+    if (executionModeEffective === "__invalid__") {
+      return res.status(400).json({ error: "executionMode_invalid" });
+    }
+    if (proxyUrlEffective === "__invalid__") {
+      return res.status(400).json({ error: "proxyUrl_invalid" });
+    }
+
+    if (dateStart === "__invalid__") {
+      return res.status(400).json({ error: "dateStart_invalid" });
+    }
+    if (dateEnd === "__invalid__") {
+      return res.status(400).json({ error: "dateEnd_invalid" });
+    }
+    if (isIsoDateOnly(dateStart) && isIsoDateOnly(dateEnd)) {
+      if (dateStart > dateEnd) {
+        return res.status(400).json({ error: "dateRange_invalid" });
+      }
+    }
+
+    const numFields = [
+      ["daysFromNowMin", daysFromNowMin],
+      ["daysFromNowMax", daysFromNowMax],
+      ["weeksFromNowMin", weeksFromNowMin],
+      ["weeksFromNowMax", weeksFromNowMax],
+    ];
+    for (const [name, value] of numFields) {
+      if (value === undefined || value === null) continue;
+      if (value === "__invalid__") {
+        return res.status(400).json({ error: `${name}_invalid` });
+      }
+      if (!isNonNegativeInt(value)) {
+        return res.status(400).json({ error: `${name}_invalid` });
+      }
+    }
+    if (
+      daysFromNowMin !== undefined &&
+      daysFromNowMax !== undefined &&
+      daysFromNowMin !== null &&
+      daysFromNowMax !== null &&
+      isNonNegativeInt(daysFromNowMin) &&
+      isNonNegativeInt(daysFromNowMax) &&
+      daysFromNowMin > daysFromNowMax
+    ) {
+      return res.status(400).json({ error: "daysFromNowRange_invalid" });
+    }
+    if (
+      weeksFromNowMin !== undefined &&
+      weeksFromNowMax !== undefined &&
+      weeksFromNowMin !== null &&
+      weeksFromNowMax !== null &&
+      isNonNegativeInt(weeksFromNowMin) &&
+      isNonNegativeInt(weeksFromNowMax) &&
+      weeksFromNowMin > weeksFromNowMax
+    ) {
+      return res.status(400).json({ error: "weeksFromNowRange_invalid" });
+    }
+
+    try {
+      const user = store.createSession({
+        loginUrl,
+        email,
+        password,
+        displayName,
+        pickupPoint,
+        headless: headlessEffective,
+        reschedule: rescheduleBool,
+        executionMode: executionModeEffective,
+        dateStart,
+        dateEnd,
+        daysFromNowMin,
+        daysFromNowMax,
+        weeksFromNowMin,
+        weeksFromNowMax,
+        proxyUrl: proxyUrlEffective,
+      });
+
+      if (autoStartEffective) {
+        pool.enqueue(user.id);
+      }
+
+      return res.status(201).json({
+        id: user.id,
+        user: sanitizeUser(user),
+        autoStarted: Boolean(autoStartEffective),
+      });
+    } catch (err) {
+      if (err?.code === "SECRET_KEY_MISSING") {
+        return res.status(500).json({
+          error: "secret_key_missing",
+          message:
+            "Server is not configured to encrypt passwords. Set VISA_SECRET_KEY in the environment.",
+        });
+      }
+      return res
+        .status(500)
+        .json({ error: "create_failed", message: String(err?.message || err) });
+    }
+  });
+
+  // Update user
+  router.put("/:id", (req, res) => {
+    const user = store.getSession(req.params.id);
+    if (!user) return res.status(404).json({ error: "not_found" });
+
+    if (user.status === "RUNNING" || user.status === "QUEUED") {
+      return res.status(409).json({
+        error: "user_busy",
+        message: "Stop the booking hunt before updating.",
+      });
+    }
+
+    const {
+      loginUrl,
+      email,
+      password,
+      displayName,
+      pickupPoint,
+      headless,
+      reschedule,
+      executionMode,
+      proxyUrl,
+    } = req.body || {};
+
+    const {
+      dateStart,
+      dateEnd,
+      daysFromNowMin,
+      daysFromNowMax,
+      weeksFromNowMin,
+      weeksFromNowMax,
+    } = normalizeDatePrefs(req.body);
+    const executionModeEffective =
+      executionMode === undefined
+        ? undefined
+        : normalizeExecutionMode(executionMode);
+    const proxyUrlEffective = normalizeNullableString(proxyUrl);
+
+    if (loginUrl !== undefined && (typeof loginUrl !== "string" || !loginUrl)) {
+      return res.status(400).json({ error: "loginUrl_invalid" });
+    }
+    if (email !== undefined && (typeof email !== "string" || !email)) {
+      return res.status(400).json({ error: "email_invalid" });
+    }
+    if (password !== undefined && (typeof password !== "string" || !password)) {
+      return res.status(400).json({ error: "password_invalid" });
+    }
+    if (
+      displayName !== undefined &&
+      (typeof displayName !== "string" || !displayName)
+    ) {
+      return res.status(400).json({ error: "displayName_invalid" });
+    }
+    if (
+      pickupPoint !== undefined &&
+      (typeof pickupPoint !== "string" || !pickupPoint)
+    ) {
+      return res.status(400).json({ error: "pickupPoint_invalid" });
+    }
+    if (reschedule !== undefined && typeof reschedule !== "boolean") {
+      return res.status(400).json({ error: "reschedule_invalid" });
+    }
+    if (executionModeEffective === "__invalid__") {
+      return res.status(400).json({ error: "executionMode_invalid" });
+    }
+    if (proxyUrlEffective === "__invalid__") {
+      return res.status(400).json({ error: "proxyUrl_invalid" });
+    }
+
+    if (dateStart === "__invalid__") {
+      return res.status(400).json({ error: "dateStart_invalid" });
+    }
+    if (dateEnd === "__invalid__") {
+      return res.status(400).json({ error: "dateEnd_invalid" });
+    }
+    // If both present in the request, enforce ordering
+    if (isIsoDateOnly(dateStart) && isIsoDateOnly(dateEnd)) {
+      if (dateStart > dateEnd) {
+        return res.status(400).json({ error: "dateRange_invalid" });
+      }
+    }
+
+    const numFields2 = [
+      ["daysFromNowMin", daysFromNowMin],
+      ["daysFromNowMax", daysFromNowMax],
+      ["weeksFromNowMin", weeksFromNowMin],
+      ["weeksFromNowMax", weeksFromNowMax],
+    ];
+    for (const [name, value] of numFields2) {
+      if (value === undefined || value === null) continue;
+      if (value === "__invalid__") {
+        return res.status(400).json({ error: `${name}_invalid` });
+      }
+      if (!isNonNegativeInt(value)) {
+        return res.status(400).json({ error: `${name}_invalid` });
+      }
+    }
+    if (
+      daysFromNowMin !== undefined &&
+      daysFromNowMax !== undefined &&
+      daysFromNowMin !== null &&
+      daysFromNowMax !== null &&
+      isNonNegativeInt(daysFromNowMin) &&
+      isNonNegativeInt(daysFromNowMax) &&
+      daysFromNowMin > daysFromNowMax
+    ) {
+      return res.status(400).json({ error: "daysFromNowRange_invalid" });
+    }
+    if (
+      weeksFromNowMin !== undefined &&
+      weeksFromNowMax !== undefined &&
+      weeksFromNowMin !== null &&
+      weeksFromNowMax !== null &&
+      isNonNegativeInt(weeksFromNowMin) &&
+      isNonNegativeInt(weeksFromNowMax) &&
+      weeksFromNowMin > weeksFromNowMax
+    ) {
+      return res.status(400).json({ error: "weeksFromNowRange_invalid" });
+    }
+
+    try {
+      const updated = store.updateSession(user.id, {
+        ...(loginUrl !== undefined ? { loginUrl } : null),
+        ...(email !== undefined ? { email } : null),
+        ...(password !== undefined ? { password } : null),
+        ...(displayName !== undefined ? { displayName } : null),
+        ...(pickupPoint !== undefined ? { pickupPoint } : null),
+        ...(headless !== undefined ? { headless } : null),
+        ...(reschedule !== undefined ? { reschedule } : null),
+        ...(executionModeEffective !== undefined
+          ? { executionMode: executionModeEffective }
+          : null),
+        ...(dateStart !== undefined ? { dateStart } : null),
+        ...(dateEnd !== undefined ? { dateEnd } : null),
+        ...(daysFromNowMin !== undefined ? { daysFromNowMin } : null),
+        ...(daysFromNowMax !== undefined ? { daysFromNowMax } : null),
+        ...(weeksFromNowMin !== undefined ? { weeksFromNowMin } : null),
+        ...(weeksFromNowMax !== undefined ? { weeksFromNowMax } : null),
+        ...(proxyUrl !== undefined ? { proxyUrl: proxyUrlEffective } : null),
+      });
+
+      return res.json({ ok: true, user: sanitizeUser(updated) });
+    } catch (err) {
+      if (err?.code === "SECRET_KEY_MISSING") {
+        return res.status(500).json({
+          error: "secret_key_missing",
+          message:
+            "Server is not configured to encrypt passwords. Set VISA_SECRET_KEY in the environment.",
+        });
+      }
+      return res
+        .status(500)
+        .json({ error: "update_failed", message: String(err?.message || err) });
+    }
+  });
+
+  // Delete user
+  router.delete("/:id", (req, res) => {
+    const user = store.getSession(req.params.id);
+    if (!user) return res.status(404).json({ error: "not_found" });
+
+    // Stop if queued/running (best-effort)
+    pool.stop(user.id);
+
+    const deleted = store.deleteSession(user.id);
+
+    // Best-effort cleanup of Chrome profile directory
+    try {
+      const root = profilesDir || path.join(baseDir, "profiles");
+      const profileDir = path.join(root, user.id);
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+
+    return res.json({ ok: true, deleted });
+  });
+
+  return router;
+}
+
+module.exports = { createUsersRouter };

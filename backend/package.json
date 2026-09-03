@@ -1,0 +1,33 @@
+{
+  "name": "slotpilot-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "build": "node --check src/server.js && node --check src/workerEntry.js && node --check main/index.js && node --check main/api-worker.js",
+    "render-build": "corepack enable && pnpm install --frozen-lockfile && pnpm run build",
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "start:worker": "node main/index.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "packageManager": "pnpm@10.27.0",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "nodemailer": "^6.10.1",
+    "playwright": "^1.52.0",
+    "selenium-webdriver": "^4.40.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6"
+  }
+}

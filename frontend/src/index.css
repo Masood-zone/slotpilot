@@ -1,0 +1,138 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 1rem;
+  --background: #f7faff;
+  --foreground: #102050;
+  --card: #ffffff;
+  --card-foreground: #102050;
+  --popover: #ffffff;
+  --popover-foreground: #102050;
+  --primary: #0070f0;
+  --primary-foreground: #ffffff;
+  --secondary: #e8f1ff;
+  --secondary-foreground: #102050;
+  --muted: #eef4fc;
+  --muted-foreground: #526582;
+  --accent: #dceaff;
+  --accent-foreground: #0b3474;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: #d9e4f2;
+  --input: #cbd9ec;
+  --ring: #0070f0;
+  --chart-1: #0070f0;
+  --chart-2: #102050;
+  --chart-3: #2f8fff;
+  --chart-4: #5b76a8;
+  --chart-5: #64b5ff;
+  --sidebar: #f0f6ff;
+  --sidebar-foreground: #102050;
+  --sidebar-primary: #0070f0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dceaff;
+  --sidebar-accent-foreground: #0b3474;
+  --sidebar-border: #cfddf0;
+  --sidebar-ring: #0070f0;
+}
+
+.dark {
+  --background: #07142f;
+  --foreground: #f5f9ff;
+  --card: #0d1d40;
+  --card-foreground: #f5f9ff;
+  --popover: #0d1d40;
+  --popover-foreground: #f5f9ff;
+  --primary: #1687ff;
+  --primary-foreground: #ffffff;
+  --secondary: #172d58;
+  --secondary-foreground: #f5f9ff;
+  --muted: #14284e;
+  --muted-foreground: #a9bad3;
+  --accent: #173a70;
+  --accent-foreground: #f5f9ff;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #243b65;
+  --input: #304a76;
+  --ring: #1687ff;
+  --chart-1: #1687ff;
+  --chart-2: #8abfff;
+  --chart-3: #4d9dff;
+  --chart-4: #b1c9ec;
+  --chart-5: #65d1ff;
+  --sidebar: #0a1837;
+  --sidebar-foreground: #f5f9ff;
+  --sidebar-primary: #1687ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #173a70;
+  --sidebar-accent-foreground: #f5f9ff;
+  --sidebar-border: #243b65;
+  --sidebar-ring: #1687ff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at 100% 0%, rgb(0 112 240 / 8%), transparent 30rem),
+      radial-gradient(circle at 0% 100%, rgb(16 32 80 / 6%), transparent 28rem);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .brand-lockup {
+    display: block;
+    flex: none;
+    background-image: url("/logo.png");
+    background-position: 40.76% 46.15%;
+    background-repeat: no-repeat;
+    background-size: 192% 533.333%;
+  }
+}
