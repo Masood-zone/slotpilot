@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   computeDateWindow,
   currentMonthRange,
+  monthRangeFor,
   selectAvailableDate,
   selectEarliestUsableSlot,
   formatAppointmentTime,
@@ -87,6 +88,16 @@ test("slot-time lookup range uses the current month window", () => {
     fromDate: "2026-06-14",
     toDate: "2026-06-30",
   });
+});
+
+test("slot-time lookup range uses the selected appointment month", () => {
+  const systemNow = new Date("2026-09-14T12:00:00.000Z");
+
+  assert.deepEqual(monthRangeFor("2026-11-14"), {
+    fromDate: "2026-11-01",
+    toDate: "2026-11-30",
+  });
+  assert.equal(currentMonthRange(systemNow).fromDate, "2026-09-14");
 });
 
 test("slot selector skips unusable slots and chooses earliest usable slot", () => {

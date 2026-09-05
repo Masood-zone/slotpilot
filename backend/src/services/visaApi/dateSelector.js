@@ -187,6 +187,41 @@ function earlierDate(a, b) {
   return a < b ? a : b;
 }
 
+function buildMonthScanPlan({ firstAvailableDate, minDate, maxDate } = {}) {
+  const first = parseIsoDateOnly(firstAvailableDate);
+  if (!first) return [];
+
+  const platformMonth = monthRangeFor(first);
+  const startDate = laterDate(
+    platformMonth?.fromDate,
+    parseIsoDateOnly(minDate),
+  );
+  const firstRange = monthRangeFor(startDate);
+  if (!firstRange) return [];
+
+  const configuredMax = parseIsoDateOnly(maxDate);
+  const endDate = configuredMax || firstRange.toDate;
+  if (startDate > endDate) return [];
+
+  const plan = [];
+  let cursor = firstRange.fromDate;
+  while (cursor <= endDate) {
+    const range = monthRangeFor(cursor);
+    if (!range) break;
+    const clipped = {
+      fromDate: laterDate(range.fromDate, startDate),
+      toDate: earlierDate(range.toDate, endDate),
+    };
+    if (clipped.fromDate <= clipped.toDate) plan.push(clipped);
+
+    const current = toDateUtc(range.fromDate);
+    current.setUTCMonth(current.getUTCMonth() + 1);
+    cursor = formatIsoDateOnly(current);
+  }
+
+  return plan;
+}
+
 function platformDateTime(dateOnly) {
   const parsed = parseIsoDateOnly(dateOnly);
   if (!parsed) return null;
@@ -203,5 +238,6 @@ module.exports = {
   currentMonthRange,
   laterDate,
   earlierDate,
+  buildMonthScanPlan,
   platformDateTime,
 };
