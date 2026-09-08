@@ -786,6 +786,9 @@ async function main() {
       page,
       auth,
       baseUrl: getBaseUrl(),
+      // Submit only through the authenticated page so the browser supplies its
+      // own same-origin cookie, Origin, Referer, and fetch metadata context.
+      finalMutationInPage: true,
       logger: (level, payload) => {
         const event = payload?.event || "";
         if (level === "debug" && event === "request_start") return;
